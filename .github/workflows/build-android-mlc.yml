@@ -1,0 +1,60 @@
+name: build-mlc-android-arm64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build python3 python3-pip git unzip wget
+
+      - name: Install Android NDK r27d
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
+          unzip -q android-ndk-r27d-linux.zip
+          echo "ANDROID_NDK=$PWD/android-ndk-r27d" >> $GITHUB_ENV
+
+      - name: Configure (Android arm64)
+        run: |
+          mkdir -p build-android
+          cd build-android
+          cmake .. -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cd build-android
+          ninja
+
+      - name: Package artifacts
+        run: |
+          mkdir -p out/bin out/lib
+          # Grab any mlc_llm binary if it exists in build output
+          find build-android -type f -name "mlc_llm" -exec cp -v {} out/bin/ \; || true
+          # Grab shared libs
+          find build-android -type f -name "*.so" -exec cp -v {} out/lib/ \; || true
+
+          echo "=== out/bin ==="
+          ls -lah out/bin || true
+          echo "=== out/lib ==="
+          ls -lah out/lib || true
+
+          tar -czf mlc-android-arm64.tar.gz -C out .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlc-android-arm64
+          path: mlc-android-arm64.tar.gz
