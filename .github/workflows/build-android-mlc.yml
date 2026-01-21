@@ -15,7 +15,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build python3 python3-pip git unzip wget
+          sudo apt-get install -y cmake ninja-build python3 python3-pip git unzip wget curl build-essential
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          source $HOME/.cargo/env
+          rustup target add aarch64-linux-android
 
       - name: Install Android NDK r27d
         run: |
