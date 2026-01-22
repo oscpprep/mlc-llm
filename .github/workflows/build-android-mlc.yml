@@ -32,44 +32,71 @@ jobs:
           mkdir -p build-android
           cd build-android
           cmake .. -G Ninja \
-          -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
-          -DANDROID_ABI=arm64-v8a \
-          -DANDROID_PLATFORM=android-28 \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DTVM_USE_LIBBACKTRACE=OFF \
-          -DTVM_FFI_USE_LIBBACKTRACE=OFF \
-          -DTVM_USE_STACK_TRACE=OFF
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DTVM_USE_LIBBACKTRACE=OFF \
+            -DTVM_FFI_USE_LIBBACKTRACE=OFF \
+            -DTVM_USE_STACK_TRACE=OFF
 
-     
-
-      - name: Build
+      - name: Build (CMake/Ninja)
         run: |
           cd build-android
           ninja
+
+      - name: Build mlc_llm CLI (Cargo, Android arm64)
+        run: |
+          source $HOME/.cargo/env
+
+          export API=28
+          export CC_aarch64_linux_android="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang"
+          export CXX_aarch64_linux_android="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang++"
+          export AR_aarch64_linux_android="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          export RANLIB_aarch64_linux_android="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib"
+          export PKG_CONFIG_ALLOW_CROSS=1
+
+          echo "=== Try cargo build from repo root ==="
+          cargo build --release --target aarch64-linux-android || true
+
+          echo "=== Try cargo build in ./rust if present ==="
+          if [ -d rust ]; then (cd rust && cargo build --release --target aarch64-linux-android) || true; fi
+
+          echo "=== Try cargo build in ./cli if present ==="
+          if [ -d cli ]; then (cd cli && cargo build --release --target aarch64-linux-android) || true; fi
+
+          echo "=== Cargo outputs (executables) ==="
+          find . -path "*target/aarch64-linux-android/release/*" -type f -perm -111 -maxdepth 8 -print || true
 
       - name: Package artifacts
         run: |
           mkdir -p out/bin out/lib
 
-          echo "=== searching for executables containing 'mlc' ==="
+          echo "=== searching for executables containing 'mlc' (cmake outputs) ==="
           find build-android -type f -perm -111 -iname "*mlc*" -print | head -200 || true
-          
-          echo "=== searching for mlc_llm explicitly ==="
+
+          echo "=== searching for mlc_llm explicitly (cmake outputs) ==="
           find build-android -type f -name "mlc_llm" -perm -111 -print || true
-          
-          # Copy best guess executables
+
+          # Copy best-guess CMake executables (if any)
           find build-android -type f -perm -111 -iname "*mlc*llm*" -exec cp -v {} out/bin/ \; || true
           find build-android -type f -perm -111 -name "mlc_llm" -exec cp -v {} out/bin/ \; || true
-          
-          # Copy shared libs
+
+          # Copy Cargo-built executables
+          echo "=== searching for executables in target/aarch64-linux-android/release ==="
+          find . -path "*target/aarch64-linux-android/release/*" -type f -perm -111 -print | head -200 || true
+          find . -path "*target/aarch64-linux-android/release/*" -type f -perm -111 -exec cp -v {} out/bin/ \; || true
+
+          # Copy shared libs (CMake build produces these)
           find build-android -type f -name "*.so" -exec cp -v {} out/lib/ \; || true
-          
+
           echo "=== out/bin ==="
           ls -lah out/bin || true
           echo "=== out/lib ==="
           ls -lah out/lib || true
-          
+
           tar -czf mlc-android-arm64.tar.gz -C out .
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
