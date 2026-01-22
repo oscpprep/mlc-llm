@@ -38,9 +38,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release \
           -DTVM_USE_LIBBACKTRACE=OFF \
           -DTVM_FFI_USE_LIBBACKTRACE=OFF \
-          -DUSE_LIBBACKTRACE=OFF \
-          -DTVM_USE_STACK_TRACE=OFF \
-          -DTVM_RUNTIME_ONLY=ON
+          -DTVM_USE_STACK_TRACE=OFF
 
      
 
@@ -52,18 +50,26 @@ jobs:
       - name: Package artifacts
         run: |
           mkdir -p out/bin out/lib
-          # Grab any mlc_llm binary if it exists in build output
-          find build-android -type f -name "mlc_llm" -exec cp -v {} out/bin/ \; || true
-          # Grab shared libs
-          find build-android -type f -name "*.so" -exec cp -v {} out/lib/ \; || true
 
+          echo "=== searching for executables containing 'mlc' ==="
+          find build-android -type f -perm -111 -iname "*mlc*" -print | head -200 || true
+          
+          echo "=== searching for mlc_llm explicitly ==="
+          find build-android -type f -name "mlc_llm" -perm -111 -print || true
+          
+          # Copy best guess executables
+          find build-android -type f -perm -111 -iname "*mlc*llm*" -exec cp -v {} out/bin/ \; || true
+          find build-android -type f -perm -111 -name "mlc_llm" -exec cp -v {} out/bin/ \; || true
+          
+          # Copy shared libs
+          find build-android -type f -name "*.so" -exec cp -v {} out/lib/ \; || true
+          
           echo "=== out/bin ==="
           ls -lah out/bin || true
           echo "=== out/lib ==="
           ls -lah out/lib || true
-
+          
           tar -czf mlc-android-arm64.tar.gz -C out .
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
