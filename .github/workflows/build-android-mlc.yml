@@ -16,6 +16,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build python3 python3-pip git unzip wget curl build-essential
+          # Rust is still needed for some internal dependencies (like tokenizers)
           curl https://sh.rustup.rs -sSf | sh -s -- -y
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           source $HOME/.cargo/env
@@ -38,61 +39,39 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DTVM_USE_LIBBACKTRACE=OFF \
             -DTVM_FFI_USE_LIBBACKTRACE=OFF \
-            -DTVM_USE_STACK_TRACE=OFF
+            -DTVM_USE_STACK_TRACE=OFF \
+            -DCMAKE_CXX_FLAGS="-fPIC"
 
-      - name: Build (CMake/Ninja)
+      - name: Build
         run: |
           cd build-android
+          # Build the main libraries
           ninja
-
-      - name: Build mlc_llm CLI (Cargo, Android arm64)
-        run: |
-          source $HOME/.cargo/env
-
-          export API=28
-          export CC_aarch64_linux_android="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang"
-          export CXX_aarch64_linux_android="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang++"
-          export AR_aarch64_linux_android="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-          export RANLIB_aarch64_linux_android="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib"
-          export PKG_CONFIG_ALLOW_CROSS=1
-
-          echo "=== Try cargo build from repo root ==="
-          cargo build --release --target aarch64-linux-android || true
-
-          echo "=== Try cargo build in ./rust if present ==="
-          if [ -d rust ]; then (cd rust && cargo build --release --target aarch64-linux-android) || true; fi
-
-          echo "=== Try cargo build in ./cli if present ==="
-          if [ -d cli ]; then (cd cli && cargo build --release --target aarch64-linux-android) || true; fi
-
-          echo "=== Cargo outputs (executables) ==="
-          find . -path "*target/aarch64-linux-android/release/*" -type f -perm -111 -maxdepth 8 -print || true
+          # Explicitly build the CLI executable
+          ninja mlc_chat_cli
 
       - name: Package artifacts
         run: |
           mkdir -p out/bin out/lib
 
-          echo "=== searching for executables containing 'mlc' (cmake outputs) ==="
-          find build-android -type f -perm -111 -iname "*mlc*" -print | head -200 || true
+          # 1. Grab the CLI executable (mlc_chat_cli)
+          echo "=== Copying Executables ==="
+          # Try to find mlc_chat_cli and copy it to out/bin
+          find build-android -type f -name "mlc_chat_cli" -exec cp -v {} out/bin/ \; || true
+          
+          # Rename it to mlc_llm in the output for convenience (optional, but standardizes usage)
+          if [ -f out/bin/mlc_chat_cli ]; then
+            cp out/bin/mlc_chat_cli out/bin/mlc_llm
+          fi
 
-          echo "=== searching for mlc_llm explicitly (cmake outputs) ==="
-          find build-android -type f -name "mlc_llm" -perm -111 -print || true
-
-          # Copy best-guess CMake executables (if any)
-          find build-android -type f -perm -111 -iname "*mlc*llm*" -exec cp -v {} out/bin/ \; || true
-          find build-android -type f -perm -111 -name "mlc_llm" -exec cp -v {} out/bin/ \; || true
-
-          # Copy Cargo-built executables
-          echo "=== searching for executables in target/aarch64-linux-android/release ==="
-          find . -path "*target/aarch64-linux-android/release/*" -type f -perm -111 -print | head -200 || true
-          find . -path "*target/aarch64-linux-android/release/*" -type f -perm -111 -exec cp -v {} out/bin/ \; || true
-
-          # Copy shared libs (CMake build produces these)
+          # 2. Grab shared libs
+          echo "=== Copying Libraries ==="
           find build-android -type f -name "*.so" -exec cp -v {} out/lib/ \; || true
 
-          echo "=== out/bin ==="
+          # List contents for verification
+          echo "=== out/bin contents ==="
           ls -lah out/bin || true
-          echo "=== out/lib ==="
+          echo "=== out/lib contents ==="
           ls -lah out/lib || true
 
           tar -czf mlc-android-arm64.tar.gz -C out .
